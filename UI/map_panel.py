@@ -38,7 +38,7 @@ def create_map_panel(selected_day_number: int) -> ft.Container:
                     text_align=ft.TextAlign.CENTER,
                 ),
                 ft.Text(
-                    "일정 패널을 접으면 지도를 더 넓게 볼 수 있습니다.",
+                    "왼쪽 일정과 함께 동선을 확인할 수 있습니다.",
                     size=13,
                     color="#7F8A99",
                     text_align=ft.TextAlign.CENTER,

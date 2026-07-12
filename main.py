@@ -13,6 +13,7 @@ def main(page: ft.Page) -> None:
     # Flet 기본 여백을 없앱니다.
     # 우리가 직접 Header / Body 여백을 제어하기 위함입니다.
     page.padding = 0
+    page.bgcolor = "#11151B"
 
     # 16:9 기준의 기본 창 크기입니다.
     # 1600x900은 1920x1080 모니터에서도 창 모드로 보기 좋고,
@@ -27,7 +28,10 @@ def main(page: ft.Page) -> None:
         pass
 
     # 실제 화면 전체를 만드는 함수입니다.
-    page.add(create_dashboard_view(page))
+    dashboard_view = create_dashboard_view(page)
+    page.controls.clear()
+    page.add(dashboard_view)
+    page.update()
 
 
 ft.run(main)
