@@ -1,21 +1,40 @@
 import flet as ft
 
+from UI.theme import (
+    ACCENT_STRONG_COLOR,
+    AGENT_MESSAGE_BACKGROUND_COLOR,
+    AGENT_MESSAGE_TEXT_COLOR,
+    PANEL_BACKGROUND_COLOR,
+    PRIMARY_TEXT_COLOR,
+    SECONDARY_TEXT_COLOR,
+    USER_MESSAGE_BACKGROUND_COLOR,
+    USER_MESSAGE_TEXT_COLOR,
+    create_condition_chip,
+    create_divider,
+    create_panel_border,
+    create_primary_button,
+)
 
 def create_chat_message(role: str, message: str) -> ft.Container:
-    """채팅 메시지 말풍선을 만듭니다.
-
-    role:
-        "user" 또는 "agent"를 받습니다.
-
-    message:
-        화면에 보여줄 메시지 내용입니다.
-    """
+    """채팅 메시지 말풍선을 만듭니다."""
 
     is_user_message = role == "user"
 
-    role_label = "사용자" if is_user_message else "Agent"
-    background_color = "#233044" if is_user_message else "#1E252E"
-    role_color = "#9CCBFF" if is_user_message else "#B7F5C8"
+    role_label = "나" if is_user_message else "여행 도우미"
+
+    background_color = (
+        USER_MESSAGE_BACKGROUND_COLOR
+        if is_user_message
+        else AGENT_MESSAGE_BACKGROUND_COLOR
+    )
+
+    message_color = (
+        USER_MESSAGE_TEXT_COLOR
+        if is_user_message
+        else AGENT_MESSAGE_TEXT_COLOR
+    )
+
+    role_color = USER_MESSAGE_TEXT_COLOR if is_user_message else ACCENT_STRONG_COLOR
 
     return ft.Container(
         padding=12,
@@ -32,7 +51,7 @@ def create_chat_message(role: str, message: str) -> ft.Container:
                 ft.Text(
                     message,
                     size=13,
-                    color="#E6EAF0",
+                    color=message_color,
                 ),
             ],
             spacing=4,
@@ -46,79 +65,87 @@ def create_understood_condition_chip(label: str) -> ft.Container:
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=10, vertical=6),
         border_radius=999,
-        bgcolor="#20242C",
+        bgcolor="#162A41",
         content=ft.Text(
             label,
             size=12,
-            color="#D6DEE8",
+            color="#90A7B0",
         ),
     )
+
+def get_condition_label(travel_condition) -> str:
+    """조건 객체 또는 문자열에서 UI 표시용 label을 꺼냅니다."""
+
+    if isinstance(travel_condition, dict):
+        return travel_condition.get("label", "조건")
+
+    return str(travel_condition)
 
 
 def create_agent_panel(
     chat_message_list: ft.ListView,
     user_message_input: ft.TextField,
     on_send_message,
+    travel_condition_chips: list[str],
 ) -> ft.Container:
-    """오른쪽 Agent 패널 전체를 만듭니다.
+    """오른쪽 여행 도우미 패널 전체를 만듭니다."""
 
-    구성:
-    1. 제목
-    2. Agent가 이해한 조건
-    3. 채팅 내역
-    4. 하단 입력창
-
-    입력창은 항상 아래에 있어야 사용자가 쉽게 다음 요청을 입력할 수 있습니다.
-    """
+    if travel_condition_chips:
+        understood_conditions_controls = [
+            create_condition_chip(get_condition_label(travel_condition))
+            for travel_condition in travel_condition_chips
+        ]
+    else:
+        understood_conditions_controls = [
+            create_condition_chip("조건 대기 중"),
+        ]
 
     understood_conditions = ft.Row(
-        controls=[
-            create_understood_condition_chip("2박 3일"),
-            create_understood_condition_chip("가족"),
-            create_understood_condition_chip("렌터카"),
-            create_understood_condition_chip("애월 숙소"),
-        ],
+        controls=understood_conditions_controls,
         wrap=True,
         spacing=8,
         run_spacing=8,
     )
 
+    send_button = create_primary_button(
+        label="전송",
+        width=76,
+        height=34,
+        on_click=on_send_message,
+    )
+
     return ft.Container(
         expand=True,
         padding=16,
-        bgcolor="#161A20",
+        bgcolor=PANEL_BACKGROUND_COLOR,
         border_radius=16,
-        border=ft.Border.all(1, "#303642"),
+        border=create_panel_border(),
         content=ft.Column(
             controls=[
                 ft.Text(
-                    "제주 여행 Agent",
+                    "제주 여행 도우미",
                     size=20,
                     weight=ft.FontWeight.BOLD,
+                    color=PRIMARY_TEXT_COLOR,
                 ),
                 ft.Text(
-                    "자연어로 일정 수정 요청을 입력하세요.",
+                    "먼저 원하는 여행 조건을 자연어로 입력하세요.",
                     size=12,
-                    color="#9AA4B2",
+                    color=SECONDARY_TEXT_COLOR,
                 ),
                 ft.Text(
-                    "Agent가 이해한 조건",
+                    "현재 여행 조건",
                     size=13,
                     weight=ft.FontWeight.BOLD,
+                    color=PRIMARY_TEXT_COLOR,
                 ),
                 understood_conditions,
-                ft.Container(
-                    height=1,
-                    bgcolor="#303642",
-                ),
+                create_divider(),
                 chat_message_list,
                 ft.Row(
                     controls=[
                         user_message_input,
-                        ft.FilledButton(
-                            content=ft.Text("전송"),
-                            on_click=on_send_message,
-                        ),
+                        send_button,
                     ],
                     spacing=8,
                 ),
