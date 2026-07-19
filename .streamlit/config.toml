@@ -1,0 +1,13 @@
+# .streamlit/config.toml
+# app.py와 같은 폴더(streamlit run을 실행하는 위치)에 .streamlit/ 폴더를 만들고 이 파일을 넣으세요.
+#
+# 이 [theme] 블록은 앱을 항상 '밝은 테마'로 고정합니다.
+# (사용자 브라우저가 다크 모드여도 이 설정이 우선 적용됩니다.)
+# 색상은 기존 Flet theme.py의 warm pastel 팔레트와 동일하게 맞췄습니다.
+
+[theme]
+base = "light"                       # 밝은 테마 기준 → 기본 글자색이 어두워짐
+primaryColor = "#D98253"             # 강조색(전송 버튼, 선택된 Day 등)
+backgroundColor = "#FEF4EE"          # 전체 배경 — 아이보리
+secondaryBackgroundColor = "#FFF1EC" # 카드/입력창/챗 영역 배경 — 연분홍빛 아이보리
+textColor = "#4A2F2A"                # 기본 글자색 — 진한 갈색
