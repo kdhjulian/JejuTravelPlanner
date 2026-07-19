@@ -1,3 +1,5 @@
+import threading
+
 import flet as ft
 
 from Graph.travel_graph import run_travel_agent
@@ -11,10 +13,8 @@ from UI.theme import (
     INPUT_BORDER_COLOR,
     INPUT_FOCUSED_BORDER_COLOR,
     INPUT_TEXT_COLOR,
-    create_condition_chip,
 )
 from app_config import (
-    APP_SCOPE_LABEL,
     APP_TITLE,
     DEFAULT_TRAVEL_CONDITION,
     SUPPORTED_DESTINATION_NAME,
@@ -37,7 +37,7 @@ def create_header() -> ft.Container:
                     color=HEADER_TEXT_COLOR,
                 ),
                 ft.Container(expand=True),
-                create_condition_chip(APP_SCOPE_LABEL),
+                # create_condition_chip(APP_SCOPE_LABEL),
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,
@@ -247,71 +247,85 @@ def create_dashboard_view(page: ft.Page) -> ft.Column:
         refresh_dashboard()
 
     def handle_send_message(event: ft.ControlEvent) -> None:
-        """여행 도우미 입력창에서 메시지를 보냈을 때 실행됩니다."""
+        """여행 도우미 입력창에서 메시지를 보냈을 때 실행됩니다.
+
+        LLM 호출은 오래 걸리므로 별도 스레드에서 실행합니다.
+        이벤트 핸들러가 즉시 반환되어야 Flet 이벤트 루프가
+        UI 갱신(사용자 메시지 표시, 타이핑 인디케이터)을 처리할 수 있습니다.
+        """
 
         user_message = user_message_input.value.strip()
 
         if not user_message:
             return
 
-        # ── 1) 사용자 메시지를 즉시 화면에 표시 ──
+        # ── 1) 사용자 메시지를 즉시 화면에 표시하고 입력창 비우기 ──
         chat_message_list.controls.append(
             create_chat_message("user", user_message)
         )
         user_message_input.value = ""
+        user_message_input.disabled = True          # 중복 전송 방지
 
         # ── 2) 타이핑 인디케이터 표시 ──
         typing_indicator = create_typing_indicator()
         chat_message_list.controls.append(typing_indicator)
-        page.update()
+        page.update()                               # 여기서 UI가 즉시 갱신됨
 
-        # ── 3) LLM 에이전트 호출 (동기 블로킹) ──
-        try:
-            agent_result = run_travel_agent(
-                user_message=user_message,
-                selected_day_number=ui_state["selected_day_number"],
-                destination_name=SUPPORTED_DESTINATION_NAME,
-                travel_conditions=ui_state["travel_conditions"],
-                itinerary_days=ui_state["itinerary_days"],
-                trip_day_count=ui_state["trip_day_count"],
+        # ── 3) 백그라운드 스레드에서 LLM 에이전트 호출 ──
+        def _run_agent_in_background():
+            try:
+                agent_result = run_travel_agent(
+                    user_message=user_message,
+                    selected_day_number=ui_state["selected_day_number"],
+                    destination_name=SUPPORTED_DESTINATION_NAME,
+                    travel_conditions=ui_state["travel_conditions"],
+                    itinerary_days=ui_state["itinerary_days"],
+                    trip_day_count=ui_state["trip_day_count"],
+                )
+
+                ui_state["destination_name"] = SUPPORTED_DESTINATION_NAME
+
+                if "trip_day_count" in agent_result:
+                    ui_state["trip_day_count"] = agent_result["trip_day_count"]
+
+                if "travel_conditions" in agent_result:
+                    ui_state["travel_conditions"] = agent_result["travel_conditions"]
+
+                if "itinerary_days" in agent_result:
+                    ui_state["itinerary_days"] = agent_result["itinerary_days"]
+
+                if "target_day_number" in agent_result:
+                    target_day_number = agent_result["target_day_number"]
+                    total_day_count = len(ui_state["itinerary_days"])
+
+                    if 1 <= target_day_number <= total_day_count:
+                        ui_state["selected_day_number"] = target_day_number
+
+                agent_response = agent_result.get(
+                    "agent_response",
+                    "요청을 확인했습니다.",
+                )
+
+            except Exception as error:
+                agent_response = (
+                    "LangGraph 실행 중 오류가 발생했습니다. "
+                    f"오류 내용: {error}"
+                )
+
+            # ── 4) 타이핑 인디케이터 제거 → 에이전트 응답 표시 ──
+            if typing_indicator in chat_message_list.controls:
+                chat_message_list.controls.remove(typing_indicator)
+
+            chat_message_list.controls.append(
+                create_chat_message("agent", agent_response)
             )
+            user_message_input.disabled = False      # 입력 다시 활성화
+            refresh_dashboard()
 
-            ui_state["destination_name"] = SUPPORTED_DESTINATION_NAME
-
-            if "trip_day_count" in agent_result:
-                ui_state["trip_day_count"] = agent_result["trip_day_count"]
-
-            if "travel_conditions" in agent_result:
-                ui_state["travel_conditions"] = agent_result["travel_conditions"]
-
-            if "itinerary_days" in agent_result:
-                ui_state["itinerary_days"] = agent_result["itinerary_days"]
-
-            if "target_day_number" in agent_result:
-                target_day_number = agent_result["target_day_number"]
-                total_day_count = len(ui_state["itinerary_days"])
-
-                if 1 <= target_day_number <= total_day_count:
-                    ui_state["selected_day_number"] = target_day_number
-
-            agent_response = agent_result.get(
-                "agent_response",
-                "요청을 확인했습니다.",
-            )
-
-        except Exception as error:
-            agent_response = (
-                "LangGraph 실행 중 오류가 발생했습니다. "
-                f"오류 내용: {error}"
-            )
-
-        # ── 4) 타이핑 인디케이터 제거 → 에이전트 응답 표시 ──
-        chat_message_list.controls.remove(typing_indicator)
-        chat_message_list.controls.append(
-            create_chat_message("agent", agent_response)
-        )
-
-        refresh_dashboard()
+        threading.Thread(
+            target=_run_agent_in_background,
+            daemon=True,
+        ).start()
 
     user_message_input.on_submit = handle_send_message
 

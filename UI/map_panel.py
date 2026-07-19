@@ -1,33 +1,3 @@
-"""
-UI/map_panel.py — 중앙 지도(동선 미리보기) 패널 UI
-
-대시보드의 중앙 영역을 구성합니다.
-실제 지도 API 연동 전 단계에서, 선택된 Day의 일정을
-번호 순서(동선)로 카드 형태로 표시합니다.
-
-컴포넌트 구조:
-    ┌────────────────────────────────────────┐
-    │  "동선 미리보기"     [지도 API 전] [Day N] │
-    │  안내 메시지                             │
-    │                                        │
-    │  ┌─ 동선 카드 ──────────────────────┐  │
-    │  │ ① 성산일출봉           10:00     │  │
-    │  │   부모님과 함께...      차로 20분  │  │
-    │  └──────────────────────────────────┘  │
-    │  ┌─ 동선 카드 ──────────────────────┐  │
-    │  │ ② 점심 식당           12:00     │  │
-    │  │   ...                           │  │
-    │  └──────────────────────────────────┘  │
-    │                                        │
-    │     [장소 검색] [경로 검증] [숙소 보기]    │
-    └────────────────────────────────────────┘
-
-향후 개선:
-    - 실제 지도 API(Kakao Maps, Google Maps 등) 연동 시
-      동선 카드 대신 지도 위에 마커·경로를 표시합니다.
-    - 하단 버튼(장소 검색, 경로 검증, 숙소 보기)에 실제 기능을 연결합니다.
-"""
-
 import flet as ft
 
 from UI.theme import (
@@ -287,11 +257,6 @@ def create_map_panel(
                         ),
                         ft.Container(expand=True),     # 좌우 끝 정렬용 스페이서
                         create_pill_button(
-                            label="지도 API 전",        # 향후 지도 API 연동 상태 표시
-                            width=108,
-                            height=34,
-                        ),
-                        create_pill_button(
                             label=day_label,
                             is_selected=True,           # 항상 활성 상태로 표시
                             width=104,
@@ -319,27 +284,27 @@ def create_map_panel(
                 # ── 하단 기능 버튼 행 ─────────────────────────
                 # 현재는 동작하지 않는 플레이스홀더 버튼입니다.
                 # 향후 지도 API 연동 시 실제 기능을 연결합니다.
-                ft.Row(
-                    controls=[
-                        create_pill_button(
-                            label="장소 검색",
-                            width=108,
-                            height=34,
-                        ),
-                        create_pill_button(
-                            label="경로 검증",
-                            width=108,
-                            height=34,
-                        ),
-                        create_pill_button(
-                            label="숙소 보기",
-                            width=108,
-                            height=34,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=10,
-                ),
+                # ft.Row(
+                #     controls=[
+                #         create_pill_button(
+                #             label="장소 검색",
+                #             width=108,
+                #             height=34,
+                #         ),
+                #         create_pill_button(
+                #             label="경로 검증",
+                #             width=108,
+                #             height=34,
+                #         ),
+                #         create_pill_button(
+                #             label="숙소 보기",
+                #             width=108,
+                #             height=34,
+                #         ),
+                #     ],
+                #     alignment=ft.MainAxisAlignment.CENTER,
+                #     spacing=10,
+                # ),
             ],
             spacing=12,
         ),

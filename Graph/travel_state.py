@@ -80,13 +80,24 @@ class TravelCondition(TypedDict):
 class ItineraryItem(TypedDict):
     """하루 일정 안에 들어가는 장소/활동 카드입니다."""
 
-    item_id: str        # 고유 식별자 (예: "day1-001", "day2-modified-003")
-    time: str           # 일정 시간 (예: "10:00", "오후 2:00") — UI에 직접 표시
-    title: str          # 카드 제목 (예: "성산일출봉") — UI에 직접 표시
-    description: str    # 짧은 설명 (예: "부모님 걸음에 맞춰 완만한 코스 추천")
-    travel_time: str    # 이전 일정에서의 이동 시간 (예: "차로 약 20분")
-    is_fixed: bool      # 사용자가 고정한 카드인지 여부 — True이면 LLM이 수정 불가
-    source: str         # 생성 출처 (예: "llm", "llm_patch", "user")
+    item_id: str
+    time: str
+
+    title: str
+
+    description: str
+    travel_time: str
+    is_fixed: bool
+    source: str
+
+    # API 연동 전 AI 기반 장소 추정 필드입니다.
+    is_place_specific: NotRequired[bool]
+    place_name: NotRequired[str]
+    place_area: NotRequired[str]
+    place_category: NotRequired[str]
+    place_selection_reason: NotRequired[str]
+    search_query: NotRequired[str]
+    place_verification_status: NotRequired[str]
 
 
 # ──────────────────────────────────────────────────────────────

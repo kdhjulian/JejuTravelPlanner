@@ -36,7 +36,6 @@ from UI.theme import (
     create_pill_button,
 )
 
-
 # ──────────────────────────────────────────────────────────────
 # Day 버튼 생성
 # ──────────────────────────────────────────────────────────────
@@ -109,6 +108,42 @@ def create_empty_itinerary_notice(day_number: int) -> ft.Container:
         ),
     )
 
+def build_place_meta_text(schedule_item: dict) -> str:
+    """일정 카드에 표시할 장소 메타 정보를 만듭니다."""
+
+    place_category = str(schedule_item.get("place_category", "")).strip()
+    place_area = str(schedule_item.get("place_area", "")).strip()
+    verification_status = str(
+        schedule_item.get("place_verification_status", "")
+    ).strip()
+
+    meta_parts = []
+
+    if place_category:
+        meta_parts.append(place_category)
+
+    if place_area:
+        meta_parts.append(place_area)
+
+    if verification_status == "ai_unverified":
+        meta_parts.append("AI 장소 추정")
+    elif verification_status == "api_verified":
+        meta_parts.append("장소 검증 완료")
+    elif verification_status:
+        meta_parts.append(verification_status)
+
+    return " · ".join(meta_parts)
+
+
+def build_search_query_text(schedule_item: dict) -> str:
+    """API 연동 전 단계에서 장소 검색어를 카드에 표시합니다."""
+
+    search_query = str(schedule_item.get("search_query", "")).strip()
+
+    if not search_query:
+        return ""
+
+    return f"검색어: {search_query}"
 
 # ──────────────────────────────────────────────────────────────
 # 일정 카드 생성
@@ -121,36 +156,21 @@ def create_itinerary_card(
     on_delete_item,
     on_toggle_fixed_item,
 ) -> ft.Container:
-    """일정 카드 하나를 만듭니다.
+    """일정 카드 하나를 만듭니다."""
 
-    각 카드에는 시간, 제목, 설명, 이동 시간이 표시되며,
-    하단에 순서 이동·삭제·고정 버튼이 배치됩니다.
-
-    Args:
-        schedule_item:       ItineraryItem 딕셔너리 (time, title, description 등).
-        day_number:          이 카드가 속한 Day 번호.
-        on_move_item_up:     "위로 이동" 버튼 핸들러.
-        on_move_item_down:   "아래로 이동" 버튼 핸들러.
-        on_delete_item:      "삭제" 버튼 핸들러.
-        on_toggle_fixed_item: "고정/고정 해제" 버튼 핸들러.
-
-    Returns:
-        ft.Container — 일정 카드 컨테이너.
-    """
-
-    # 각 액션 버튼에 전달할 데이터.
-    # 핸들러에서 event.control.data["day_number"], ["item_id"]로 접근합니다.
     button_data = {
         "day_number": day_number,
         "item_id": schedule_item.get("item_id"),
     }
 
-    # 고정 상태에 따라 버튼 라벨 변경
     fixed_button_label = (
-        "고정됨"                                 # 이미 고정된 상태
+        "고정됨"
         if schedule_item.get("is_fixed")
-        else "고정"                               # 고정되지 않은 상태
+        else "고정"
     )
+
+    place_meta_text = build_place_meta_text(schedule_item)
+    search_query_text = build_search_query_text(schedule_item)
 
     return ft.Container(
         padding=12,
@@ -159,39 +179,47 @@ def create_itinerary_card(
         border=create_card_border(),
         content=ft.Column(
             controls=[
-                # ── 상단 행: 시간 + 이동 시간 ────────────────
                 ft.Row(
                     controls=[
                         ft.Text(
                             schedule_item.get("time", "시간 미정"),
                             size=14,
                             weight=ft.FontWeight.BOLD,
-                            color=TIME_TEXT_COLOR,        # 주황 계열
+                            color=TIME_TEXT_COLOR,
                         ),
-                        ft.Container(expand=True),        # 좌우 끝 정렬용 스페이서
+                        ft.Container(expand=True),
                         ft.Text(
                             schedule_item.get("travel_time", "이동 미정"),
                             size=12,
                             weight=ft.FontWeight.BOLD,
-                            color=TRAVEL_TIME_TEXT_COLOR,  # 회갈색
+                            color=TRAVEL_TIME_TEXT_COLOR,
                         ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                # ── 제목 ──────────────────────────────────────
                 ft.Text(
                     schedule_item.get("title", "장소 미정"),
                     size=17,
                     weight=ft.FontWeight.BOLD,
                     color=PRIMARY_TEXT_COLOR,
                 ),
-                # ── 설명 ──────────────────────────────────────
+                ft.Text(
+                    place_meta_text,
+                    size=11,
+                    color=SECONDARY_TEXT_COLOR,
+                    visible=bool(place_meta_text),
+                ),
+                ft.Text(
+                    search_query_text,
+                    size=10,
+                    color=SECONDARY_TEXT_COLOR,
+                    visible=bool(search_query_text),
+                ),
                 ft.Text(
                     schedule_item.get("description", ""),
                     size=13,
                     color=SECONDARY_TEXT_COLOR,
                 ),
-                # ── 하단 액션 버튼 행 ─────────────────────────
                 ft.Row(
                     controls=[
                         create_pill_button(

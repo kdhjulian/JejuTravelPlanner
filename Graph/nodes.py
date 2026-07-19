@@ -192,33 +192,55 @@ def create_itinerary_item(
     description: str,
     travel_time: str,
     source: str = "llm",
+    is_place_specific: bool = True,
+    place_name: str | None = None,
+    place_area: str | None = None,
+    place_category: str | None = None,
+    place_selection_reason: str | None = None,
+    search_query: str | None = None,
+    place_verification_status: str | None = None,
 ) -> ItineraryItem:
-    """LLM structured output을 UI 카드용 State 데이터로 변환합니다.
+    """LLM structured output을 UI 카드용 State 데이터로 변환합니다."""
 
-    item_id는 "day{N}-{인덱스:03d}" 형식으로 고유하게 생성합니다.
+    display_title = title
 
-    Args:
-        day_number:  소속 Day 번호.
-        item_index:  Day 내 순서 번호 (1부터).
-        time:        일정 시간 문자열 (예: "10:00").
-        title:       카드 제목 (예: "성산일출봉").
-        description: 카드 설명.
-        travel_time: 이전 일정에서의 이동 시간.
-        source:      생성 출처 (기본: "llm").
+    if is_place_specific and place_name:
+        display_title = place_name
 
-    Returns:
-        ItineraryItem — UI 카드에 바로 사용 가능한 딕셔너리.
-    """
-
-    return {
+    item: ItineraryItem = {
         "item_id": f"day{day_number}-{item_index:03d}",
         "time": time,
-        "title": title,
+        "title": display_title,
         "description": description,
         "travel_time": travel_time,
-        "is_fixed": False,   # 최초 생성 시 항상 고정 해제 상태
+        "is_fixed": False,
         "source": source,
+        "is_place_specific": is_place_specific,
     }
+
+    if place_name:
+        item["place_name"] = place_name
+
+    if place_area:
+        item["place_area"] = place_area
+
+    if place_category:
+        item["place_category"] = place_category
+
+    if place_selection_reason:
+        item["place_selection_reason"] = place_selection_reason
+
+    if search_query:
+        item["search_query"] = search_query
+
+    if place_verification_status:
+        item["place_verification_status"] = place_verification_status
+    elif is_place_specific:
+        item["place_verification_status"] = "ai_unverified"
+    else:
+        item["place_verification_status"] = "not_applicable"
+
+    return item
 
 
 def build_travel_condition_summary(
@@ -709,6 +731,235 @@ def interpret_user_request_with_llm(
 
     return result
 
+def itinerary_item_requires_actual_place(schedule_item: dict) -> bool:
+    """해당 일정 카드가 실제 장소명을 반드시 가져야 하는지 판단합니다.
+
+    과거에는 "식당/카페/관광지..." 같은 카테고리 목록을 하드코딩해서 판단했지만,
+    지금은 생성 노드(LLM)가 직접 정한 is_place_specific 값만 신뢰합니다.
+    카테고리 분류 자체가 LLM의 자유 판단이므로, 코드가 별도의 고정 목록을
+    다시 들고 있을 필요가 없습니다.
+
+    Args:
+        schedule_item: 일정 카드 딕셔너리.
+
+    Returns:
+        bool — 구체 장소명이 필요한 카드이면 True.
+    """
+
+    return bool(schedule_item.get("is_place_specific"))
+
+
+# ══════════════════════════════════════════════════════════════
+# 3.5 AI 기반 장소 구체성 검토 (하드코딩 abstract_phrases 대체)
+# ══════════════════════════════════════════════════════════════
+# 예전에는 "흑돼지구이", "바다카페" 같은 금지어를 코드에 나열하고
+# 부분 문자열 매칭으로 추상 제목을 걸러냈습니다. 이 방식은
+#   - 실제 상호(예: "휴식뜰", "관광호텔식당")까지 오탐(false positive)하고
+#   - 목록에 없는 새로운 추상 표현은 놓치며(false negative)
+#   - 하나라도 걸리면 전체 일정 생성을 실패시키는 문제가 있었습니다.
+#
+# 이제는 LLM이 각 카드의 title/place_name을 문맥으로 보고
+#   ① 실제로 존재하는 구체 장소명인지 판단하고,
+#   ② 추상 활동명이면 어울리는 실제 제주 장소명을 교정 제안합니다.
+# 판단·교정을 한 번의 LLM 호출로 함께 처리합니다.
+
+def review_place_specificity_with_llm(
+    place_candidates: list[dict],
+) -> dict[str, dict] | None:
+    """LLM으로 일정 카드의 장소 구체성을 판단하고, 필요하면 교정합니다.
+
+    Args:
+        place_candidates: 각 후보는 다음 키를 가진 dict.
+            - key:            후보 식별자(item_id). 결과 매칭에 사용됩니다.
+            - title:          현재 카드 제목.
+            - place_name:     현재 장소명(있으면).
+            - place_area:     지역명(있으면).
+            - place_category: 장소 유형(있으면).
+            - description:    설명(있으면).
+
+    Returns:
+        dict | None — key → 판단 결과 딕셔너리의 매핑.
+            각 결과는 다음 키를 가집니다.
+              - is_real_specific_place: bool
+              - resolved_place_name:    str | None
+              - resolved_place_area:    str | None
+              - resolved_search_query:  str | None
+              - reason:                 str
+            빈 후보면 {} 를, LLM 사용 불가/호출 실패 시 None을 반환합니다.
+    """
+
+    # 검토할 후보가 없으면 호출할 필요가 없습니다.
+    if not place_candidates:
+        return {}
+
+    # API 키가 없으면 판단 불가 → None (호출 측에서 원본 유지)
+    if not os.getenv("OPENAI_API_KEY"):
+        return None
+
+    # 지연 임포트 — 패키지 미설치 시 앱 전체가 죽지 않도록 방어
+    try:
+        from langchain_openai import ChatOpenAI
+        from pydantic import BaseModel, Field
+    except ImportError:
+        return None
+
+    # ── Pydantic Structured Output 스키마 ────────────────────
+    class PlaceReviewResult(BaseModel):
+        """개별 카드에 대한 장소 구체성 판단 결과."""
+
+        key: str = Field(
+            description="입력으로 준 후보 식별자(key)를 그대로 사용한다."
+        )
+        is_real_specific_place: bool = Field(
+            description=(
+                "title 또는 place_name이 실제로 존재하는 것으로 알려진 제주의 "
+                "구체적인 장소명/업체명(고유명사)이면 true. "
+                "'제주 흑돼지 구이', '바다 카페', '점심 식사', '해변 산책'처럼 "
+                "실제 상호가 아닌 추상 활동명이면 false."
+            )
+        )
+        resolved_place_name: str | None = Field(
+            default=None,
+            description=(
+                "is_real_specific_place가 false일 때, place_category·place_area·"
+                "description에 어울리는 실제로 존재하는 것으로 알려진 제주 "
+                "장소명/업체명을 하나만 제안한다. 확신이 없으면 null."
+            ),
+        )
+        resolved_place_area: str | None = Field(
+            default=None,
+            description="제안한 장소의 제주 지역명. 예: 제주시, 애월, 서귀포, 성산.",
+        )
+        resolved_search_query: str | None = Field(
+            default=None,
+            description="제안한 장소를 검색 API에 넣을 검색어. 예: 제주 애월 봄날카페.",
+        )
+        reason: str = Field(description="짧은 한국어 판단 이유.")
+
+    class PlaceReviewOutput(BaseModel):
+        """전체 검토 결과."""
+
+        results: list[PlaceReviewResult] = Field(
+            description="각 후보에 대한 판단 결과 목록. 입력 후보와 1:1로 대응한다."
+        )
+
+    # ── 시스템 프롬프트 ──────────────────────────────────────
+    system_prompt = """
+너는 제주 여행 플래너의 '장소 구체성 검토기'다.
+
+역할:
+- 각 일정 카드의 title / place_name이 '실제로 존재하는 구체적인 제주 장소명·업체명'인지,
+  아니면 '흑돼지 구이', '바다 카페', '점심 식사', '해변 산책'처럼 추상 활동명인지 판단한다.
+- 판단은 고정된 금지어 목록이 아니라, 이름과 카테고리·설명의 의미로 한다.
+- 추상 활동명이면, place_category·place_area·description에 어울리는
+  실제로 존재하는 것으로 알려진 제주 장소명을 하나 제안한다(교정).
+
+판단 규칙:
+1. 고유명사 상호/명소(예: 돈사돈 본관, 봄날카페, 성산일출봉, 협재해수욕장)면 is_real_specific_place=true.
+2. 일반 명사 활동(예: 흑돼지 맛집, 바다 카페, 전망 좋은 식당)이면 false.
+3. 원래 구체 장소가 필요 없는 항목(숙소 체크인, 이동, 휴식 등)이 섞여 들어오면 true로 둔다.
+4. 교정 제안은 제주 안의 장소만 한다. 제주 밖 장소는 제안하지 않는다.
+5. 존재하지 않는 장소를 지어내지 마라. 확신이 없으면 resolved_place_name을 null로 둔다.
+6. 입력 key를 그대로 사용해 각 후보와 1:1로 매칭한다. 후보 수와 결과 수를 같게 맞춘다.
+"""
+
+    user_prompt = f"""
+검토할 일정 카드 목록(JSON 배열):
+{json.dumps(place_candidates, ensure_ascii=False, indent=2)}
+"""
+
+    chat_model = ChatOpenAI(
+        model=os.getenv("TRAVEL_AGENT_MODEL", "gpt-4o-mini"),
+        temperature=0,  # 판단은 결정적으로
+    )
+
+    structured_model = chat_model.with_structured_output(PlaceReviewOutput)
+
+    try:
+        review_output = structured_model.invoke(
+            [
+                ("system", system_prompt),
+                ("human", user_prompt),
+            ]
+        )
+    except Exception:
+        # 검토 호출이 실패해도 일정 생성 자체를 막지 않도록 None 반환
+        return None
+
+    review_map: dict[str, dict] = {}
+
+    for result in review_output.results:
+        review_map[result.key] = {
+            "is_real_specific_place": result.is_real_specific_place,
+            "resolved_place_name": result.resolved_place_name,
+            "resolved_place_area": result.resolved_place_area,
+            "resolved_search_query": result.resolved_search_query,
+            "reason": result.reason,
+        }
+
+    return review_map
+
+
+def apply_place_review_to_itinerary(
+    itinerary_days: list[ItineraryDay],
+    review_map: dict[str, dict],
+) -> None:
+    """AI 검토 결과를 일정 카드에 반영합니다(제자리 수정).
+
+    처리 방식:
+        - 실제 장소로 판단되면 → 검증 상태만 "ai_unverified"로 유지.
+        - 추상 활동명이지만 교정 제안이 있으면 → 실제 장소명으로 교체하고
+          검증 상태를 "ai_resolved"로 표시.
+        - 추상 활동명이고 교정 제안도 없으면 → 카드는 유지하되
+          검증 상태를 "ai_abstract_unresolved"로 표시(추후 장소 검색 대상).
+
+    어떤 경우에도 카드를 삭제하거나 전체 일정 생성을 실패시키지 않습니다.
+
+    Args:
+        itinerary_days: 생성된 전체 일정(제자리 수정 대상).
+        review_map:     review_place_specificity_with_llm 결과.
+    """
+
+    for itinerary_day in itinerary_days:
+        for schedule_item in itinerary_day.get("items", []):
+            review = review_map.get(schedule_item.get("item_id"))
+
+            if review is None:
+                continue
+
+            # 실제 구체 장소 → 상태만 유지
+            if review.get("is_real_specific_place"):
+                schedule_item["place_verification_status"] = "ai_unverified"
+                continue
+
+            resolved_place_name = str(
+                review.get("resolved_place_name") or ""
+            ).strip()
+
+            # 추상 → 교정 제안이 있으면 실제 장소명으로 교체
+            if resolved_place_name:
+                schedule_item["place_name"] = resolved_place_name
+                schedule_item["title"] = resolved_place_name
+
+                resolved_place_area = str(
+                    review.get("resolved_place_area") or ""
+                ).strip()
+                if resolved_place_area:
+                    schedule_item["place_area"] = resolved_place_area
+
+                resolved_search_query = str(
+                    review.get("resolved_search_query") or ""
+                ).strip()
+                schedule_item["search_query"] = (
+                    resolved_search_query or resolved_place_name
+                )
+
+                schedule_item["source"] = "llm_ai_place_reviewed"
+                schedule_item["place_verification_status"] = "ai_resolved"
+            else:
+                # 교정도 못 하면 카드는 유지하되 미해결로 표시
+                schedule_item["place_verification_status"] = "ai_abstract_unresolved"
+
 
 # ══════════════════════════════════════════════════════════════
 # 4. 일정 유효성 검사 및 조회 유틸리티
@@ -718,21 +969,30 @@ def validate_generated_itinerary_days(
     itinerary_days: list[ItineraryDay],
     trip_day_count: int,
 ) -> bool:
-    """LLM이 생성한 일정 카드 데이터가 UI에 넣어도 안전한지 검사합니다.
+    """LLM이 생성한 일정 카드 데이터가 UI에 넣어도 안전한지 '구조'만 검사합니다.
 
-    검사 항목:
+    검사 항목(구조적 안전성만):
         1. Day 개수가 trip_day_count와 일치하는가
         2. Day 번호가 1~trip_day_count까지 빠짐없이 존재하는가
         3. 각 Day에 최소 1개 이상의 item이 있는가
         4. 각 item에 필수 필드가 모두 존재하는가
         5. title과 time이 비어 있지 않은가
 
+    NOTE:
+        예전에는 여기서 "제목/장소가 추상적인가"를 하드코딩 금지어로 검사하고,
+        하나라도 걸리면 전체 일정을 실패(None) 처리했습니다. 이 방식은 실제 상호까지
+        오탐하거나, 한 카드 때문에 전체 생성이 실패하는 문제가 있었습니다.
+
+        이제 장소 구체성 판단은 review_place_specificity_with_llm(AI)이 담당하며,
+        추상 카드는 실패시키지 않고 교정하거나 상태 표시만 합니다.
+        따라서 이 함수는 순수하게 '구조적 안전성'만 확인합니다.
+
     Args:
         itinerary_days: 검사할 일정 데이터.
         trip_day_count: 기대하는 총 Day 수.
 
     Returns:
-        bool — 모든 검사를 통과하면 True.
+        bool — 구조 검사를 모두 통과하면 True.
     """
 
     if len(itinerary_days) != trip_day_count:
@@ -994,8 +1254,13 @@ def validate_item_patch_operation(
         return False
 
     # add_item은 title, time이 필수 (새 카드 생성이므로)
+    # 제목이 추상적인지 여부는 더 이상 하드코딩 금지어로 막지 않습니다.
+    # 구체 장소명 유도는 patch 생성 프롬프트가 담당하며, 구조적 필수값만 확인합니다.
     if action == "add_item":
-        title = str(patch_operation.get("title", "")).strip()
+        title = str(
+            patch_operation.get("place_name")
+            or patch_operation.get("title", "")
+        ).strip()
         time = str(patch_operation.get("time", "")).strip()
 
         if not title or not time:
@@ -1383,6 +1648,9 @@ def apply_item_patch_operations(
 
         # ── add_item: 새 카드 추가 ───────────────────────────
         if action == "add_item":
+            place_name = patch_operation.get("place_name")
+            title = place_name or patch_operation.get("title", "일정 미정")
+
             patched_items.append(
                 {
                     "item_id": create_patch_item_id(
@@ -1390,14 +1658,23 @@ def apply_item_patch_operations(
                         existing_items=patched_items,
                     ),
                     "time": patch_operation.get("time", "시간 미정"),
-                    "title": patch_operation.get("title", "일정 미정"),
+                    "title": title,
                     "description": patch_operation.get("description", ""),
                     "travel_time": patch_operation.get(
                         "travel_time",
                         "이동 미정",
                     ),
                     "is_fixed": False,
-                    "source": "llm_patch",
+                    "source": "llm_ai_place_patch",
+                    "place_name": title,
+                    "place_area": patch_operation.get("place_area", ""),
+                    "place_category": patch_operation.get("place_category", ""),
+                    "place_selection_reason": patch_operation.get(
+                        "place_selection_reason",
+                        "",
+                    ),
+                    "search_query": patch_operation.get("search_query", title),
+                    "place_verification_status": "ai_unverified",
                 }
             )
             continue
@@ -1485,12 +1762,55 @@ def generate_itinerary_cards_with_llm(
 
     # ── Pydantic Structured Output 스키마 ────────────────────
     class ItineraryItemOutput(BaseModel):
-        """개별 일정 item 생성 결과."""
-
-        time: str = Field(description="일정 시간. 예: 10:00, 13:30")
-        title: str = Field(description="UI 카드에 표시할 짧은 일정 제목")
-        description: str = Field(description="사용자 조건을 반영한 짧은 설명")
-        travel_time: str = Field(description="이전 일정에서 이 일정까지의 대략적인 이동 시간")
+        time: str = Field(
+            description="일정 시간. 예: 10:00, 13:30"
+        )
+        title: str = Field(
+            description=(
+                "UI 카드에 표시할 제목. "
+                "is_place_specific이 true면 실제 장소명과 같거나 실제 장소명을 포함해야 한다. "
+                "is_place_specific이 false면 숙소 체크인, 이동, 휴식 같은 비장소성 제목도 가능하다."
+            )
+        )
+        is_place_specific: bool = Field(
+            description=(
+                "식당, 카페, 관광지, 해수욕장, 오름처럼 실제 장소명이 필요한 일정이면 true. "
+                "숙소 체크인, 숙소 휴식, 이동, 자유시간처럼 사용자가 구체 장소를 주지 않은 일정이면 false."
+            )
+        )
+        place_name: str | None = Field(
+            default=None,
+            description=(
+                "실제로 존재하는 것으로 알려진 제주 장소명 또는 업체명. "
+                "is_place_specific이 true인 경우 필수. "
+                "예: 돈사돈 본관, 오는정김밥, 봄날카페, 성산일출봉. "
+                "제주 흑돼지 구이, 바다 카페, 해변 산책 같은 추상 활동명 금지."
+            ),
+        )
+        place_area: str | None = Field(
+            default=None,
+            description="장소가 있는 제주 지역명. 예: 제주시, 애월, 서귀포, 성산"
+        )
+        place_category: str = Field(
+            description="장소 유형. 예: 식당, 카페, 관광지, 숙소, 이동, 휴식"
+        )
+        description: str = Field(
+            description="사용자 조건을 반영한 짧은 설명"
+        )
+        place_selection_reason: str | None = Field(
+            default=None,
+            description="왜 이 실제 장소를 골랐는지에 대한 짧은 이유"
+        )
+        search_query: str | None = Field(
+            default=None,
+            description=(
+                "나중에 Kakao/Naver/Google 장소 검색 API에 넣을 검색어. "
+                "실제 장소가 있는 경우 작성. 예: 제주 애월 봄날카페"
+            ),
+        )
+        travel_time: str = Field(
+            description="이전 일정에서 이 일정까지의 대략적인 이동 시간"
+        )
 
     class ItineraryDayOutput(BaseModel):
         """Day 단위 생성 결과."""
@@ -1535,12 +1855,27 @@ UI가 바로 표시할 수 있는 Day별 일정 카드 데이터를 생성해야
    예: 동행자, 이동 방식, 숙소 조건, 걷는 거리, 여행 분위기, 음식 선호, 예산, 접근성.
 7. 하루 동선이 과도하게 흩어지지 않도록 같은 권역 중심으로 구성한다.
 8. time은 UI에 표시 가능한 짧은 시간 문자열로 작성한다.
-9. title은 카드 제목으로 짧고 명확하게 작성한다.
-10. description은 이 일정이 사용자 조건에 맞는 이유를 짧게 설명한다.
-11. travel_time은 이전 일정에서의 대략적인 이동 시간으로 작성한다.
-12. 실제 지도 API 검증 전이므로 주소, 위도, 경도, place_id는 만들지 않는다.
-13. 제주 외 지역 일정은 절대 생성하지 않는다.
-14. 반환 형식은 structured output schema를 반드시 따른다.
+9. place_name에는 추상 활동명이 아니라 실제 제주 장소명 또는 실제 업체명을 넣는다.
+   예: "제주 흑돼지 구이" 금지, "돈사돈 본관" 허용.
+   예: "바다 카페" 금지, "봄날카페" 허용.
+   예: "해변 산책" 금지, "협재해수욕장" 허용.
+10. place_name은 실제로 존재하는 것으로 알려진 제주 장소명이어야 한다.
+11. description은 이 장소가 사용자 조건에 맞는 이유를 짧게 설명한다.
+12. place_selection_reason은 이 실제 장소를 고른 이유를 짧게 설명한다.
+13. search_query는 나중에 장소 검색 API에 넣을 수 있는 형태로 작성한다.
+14. travel_time은 이전 일정에서의 대략적인 이동 시간으로 작성한다.
+15. 실제 지도 API 검증 전이므로 주소, 위도, 경도, place_id는 만들지 않는다.
+16. 제주 외 지역 일정은 절대 생성하지 않는다.
+17. 반환 형식은 structured output schema를 반드시 따른다.
+
+실제 장소명 규칙:
+1. 식당, 카페, 관광지, 해수욕장, 오름, 시장, 박물관, 공원은 is_place_specific=true로 만든다.
+2. is_place_specific=true인 일정은 place_name에 실제로 존재하는 것으로 알려진 제주 장소명 또는 업체명을 넣는다.
+3. "제주 흑돼지 구이", "바다 카페", "해변 산책", "점심 식사" 같은 추상 활동명은 place_name으로 쓰지 않는다.
+4. 사용자가 숙소 이름을 주지 않은 경우 숙소 체크인, 숙소 휴식은 is_place_specific=false로 만든다.
+5. 렌터카 이동, 휴식, 자유시간도 is_place_specific=false로 만들 수 있다.
+6. is_place_specific=false인 일정은 place_name, search_query를 비워도 된다.
+7. 제주 외 지역 장소는 절대 생성하지 않는다.
 """
 
     user_prompt = f"""
@@ -1587,9 +1922,23 @@ existing_itinerary_days: {state.get("itinerary_days", [])}
                     item_index=item_index,
                     time=item_output.time,
                     title=item_output.title,
-                    description=item_output.description,
+                    description=(
+                        f"{item_output.place_category} · "
+                        f"{item_output.description}"
+                    ),
                     travel_time=item_output.travel_time,
-                    source="llm",
+                    source="llm_ai_place",
+                    is_place_specific=item_output.is_place_specific,
+                    place_name=item_output.place_name,
+                    place_area=item_output.place_area,
+                    place_category=item_output.place_category,
+                    place_selection_reason=item_output.place_selection_reason,
+                    search_query=item_output.search_query,
+                    place_verification_status=(
+                        "ai_unverified"
+                        if item_output.is_place_specific
+                        else "not_applicable"
+                    ),
                 )
             )
 
@@ -1601,12 +1950,40 @@ existing_itinerary_days: {state.get("itinerary_days", [])}
             }
         )
 
-    # ── 생성 결과 유효성 검사 ────────────────────────────────
+    # ── 생성 결과 '구조' 유효성 검사 ─────────────────────────
+    # 여기서는 Day 수·필수 필드 등 구조만 확인합니다.
+    # 장소가 추상적인지는 아래 AI 검토 단계에서 판단·교정합니다.
     if not validate_generated_itinerary_days(
         itinerary_days=itinerary_days,
         trip_day_count=trip_day_count,
     ):
         return None
+
+    # ── AI 기반 장소 구체성 검토/교정 (하드코딩 abstract_phrases 대체) ──
+    # 실제 장소명이 필요한 카드만 모아 LLM에게 판단·교정을 맡깁니다.
+    place_candidates = [
+        {
+            "key": schedule_item["item_id"],
+            "title": schedule_item.get("title", ""),
+            "place_name": schedule_item.get("place_name", ""),
+            "place_area": schedule_item.get("place_area", ""),
+            "place_category": schedule_item.get("place_category", ""),
+            "description": schedule_item.get("description", ""),
+        }
+        for itinerary_day in itinerary_days
+        for schedule_item in itinerary_day.get("items", [])
+        if itinerary_item_requires_actual_place(schedule_item)
+    ]
+
+    review_map = review_place_specificity_with_llm(place_candidates)
+
+    # 검토가 성공하면 결과를 반영합니다.
+    # 검토가 실패(None)해도 일정 생성은 그대로 살립니다(과거처럼 전체 실패시키지 않음).
+    if review_map:
+        apply_place_review_to_itinerary(
+            itinerary_days=itinerary_days,
+            review_map=review_map,
+        )
 
     return {
         "itinerary_days": itinerary_days,
