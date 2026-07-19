@@ -1,3 +1,27 @@
+"""
+UI/itinerary_panel.py — 왼쪽 여행 일정 패널 UI
+
+대시보드의 왼쪽 영역을 구성합니다.
+상단에 Day 버튼 목록을 표시하고, 하단에 선택된 Day의 일정 카드를 나열합니다.
+
+컴포넌트 구조:
+    ┌──────────────────────────────────┐
+    │  "여행 일정" (제목)               │
+    │  [Day 1] [Day 2] [Day 3] ...    │  ← Day 선택 버튼 (wrap 가능)
+    │                                  │
+    │  ┌──── 일정 카드 ─────────────┐  │
+    │  │ 10:00          차로 20분   │  │
+    │  │ 성산일출봉                  │  │
+    │  │ 부모님과 함께 여유있게...    │  │
+    │  │ [위] [아래] [삭제] [고정]  │  │
+    │  └────────────────────────────┘  │
+    │                                  │
+    │  ┌──── 일정 카드 ─────────────┐  │
+    │  │ ...                        │  │
+    │  └────────────────────────────┘  │
+    └──────────────────────────────────┘
+"""
+
 import flet as ft
 
 from UI.theme import (
@@ -13,25 +37,53 @@ from UI.theme import (
 )
 
 
+# ──────────────────────────────────────────────────────────────
+# Day 버튼 생성
+# ──────────────────────────────────────────────────────────────
 def create_day_button(
     day_number: int,
     selected_day_number: int,
     on_day_click,
 ) -> ft.Container:
-    """Day 버튼을 만듭니다."""
+    """Day 버튼을 만듭니다.
+
+    현재 선택된 Day와 일치하면 활성(하이라이트) 상태로 표시됩니다.
+    클릭 시 on_day_click 핸들러가 호출되며, event.control.data에
+    day_number가 전달됩니다.
+
+    Args:
+        day_number:          이 버튼이 나타내는 Day 번호.
+        selected_day_number: 현재 UI에서 선택된 Day 번호.
+        on_day_click:        클릭 이벤트 핸들러.
+
+    Returns:
+        ft.Container — pill 형태의 Day 버튼.
+    """
 
     return create_pill_button(
         label=f"Day {day_number}",
-        is_selected=day_number == selected_day_number,
+        is_selected=day_number == selected_day_number,  # 선택 상태 비교
         width=92,
         height=34,
         on_click=on_day_click,
-        data=day_number,
+        data=day_number,  # 핸들러에서 int(event.control.data)로 접근
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# 빈 일정 안내 카드
+# ──────────────────────────────────────────────────────────────
 def create_empty_itinerary_notice(day_number: int) -> ft.Container:
-    """아직 일정이 없는 Day에 표시할 안내 카드입니다."""
+    """아직 일정이 없는 Day에 표시할 안내 카드입니다.
+
+    Day는 존재하지만 items 목록이 비어 있을 때 사용됩니다.
+
+    Args:
+        day_number: 해당 Day 번호.
+
+    Returns:
+        ft.Container — 안내 메시지가 담긴 카드.
+    """
 
     return ft.Container(
         padding=14,
@@ -58,8 +110,47 @@ def create_empty_itinerary_notice(day_number: int) -> ft.Container:
     )
 
 
-def create_itinerary_card(schedule_item: dict[str, str]) -> ft.Container:
-    """일정 카드 하나를 만듭니다."""
+# ──────────────────────────────────────────────────────────────
+# 일정 카드 생성
+# ──────────────────────────────────────────────────────────────
+def create_itinerary_card(
+    schedule_item: dict,
+    day_number: int,
+    on_move_item_up,
+    on_move_item_down,
+    on_delete_item,
+    on_toggle_fixed_item,
+) -> ft.Container:
+    """일정 카드 하나를 만듭니다.
+
+    각 카드에는 시간, 제목, 설명, 이동 시간이 표시되며,
+    하단에 순서 이동·삭제·고정 버튼이 배치됩니다.
+
+    Args:
+        schedule_item:       ItineraryItem 딕셔너리 (time, title, description 등).
+        day_number:          이 카드가 속한 Day 번호.
+        on_move_item_up:     "위로 이동" 버튼 핸들러.
+        on_move_item_down:   "아래로 이동" 버튼 핸들러.
+        on_delete_item:      "삭제" 버튼 핸들러.
+        on_toggle_fixed_item: "고정/고정 해제" 버튼 핸들러.
+
+    Returns:
+        ft.Container — 일정 카드 컨테이너.
+    """
+
+    # 각 액션 버튼에 전달할 데이터.
+    # 핸들러에서 event.control.data["day_number"], ["item_id"]로 접근합니다.
+    button_data = {
+        "day_number": day_number,
+        "item_id": schedule_item.get("item_id"),
+    }
+
+    # 고정 상태에 따라 버튼 라벨 변경
+    fixed_button_label = (
+        "고정됨"                                 # 이미 고정된 상태
+        if schedule_item.get("is_fixed")
+        else "고정"                               # 고정되지 않은 상태
+    )
 
     return ft.Container(
         padding=12,
@@ -68,35 +159,39 @@ def create_itinerary_card(schedule_item: dict[str, str]) -> ft.Container:
         border=create_card_border(),
         content=ft.Column(
             controls=[
+                # ── 상단 행: 시간 + 이동 시간 ────────────────
                 ft.Row(
                     controls=[
                         ft.Text(
                             schedule_item.get("time", "시간 미정"),
                             size=14,
                             weight=ft.FontWeight.BOLD,
-                            color=TIME_TEXT_COLOR,
+                            color=TIME_TEXT_COLOR,        # 주황 계열
                         ),
-                        ft.Container(expand=True),
+                        ft.Container(expand=True),        # 좌우 끝 정렬용 스페이서
                         ft.Text(
                             schedule_item.get("travel_time", "이동 미정"),
                             size=12,
                             weight=ft.FontWeight.BOLD,
-                            color=TRAVEL_TIME_TEXT_COLOR,
+                            color=TRAVEL_TIME_TEXT_COLOR,  # 회갈색
                         ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
+                # ── 제목 ──────────────────────────────────────
                 ft.Text(
                     schedule_item.get("title", "장소 미정"),
                     size=17,
                     weight=ft.FontWeight.BOLD,
                     color=PRIMARY_TEXT_COLOR,
                 ),
+                # ── 설명 ──────────────────────────────────────
                 ft.Text(
                     schedule_item.get("description", ""),
                     size=13,
                     color=SECONDARY_TEXT_COLOR,
                 ),
+                # ── 하단 액션 버튼 행 ─────────────────────────
                 ft.Row(
                     controls=[
                         create_pill_button(
@@ -104,28 +199,32 @@ def create_itinerary_card(schedule_item: dict[str, str]) -> ft.Container:
                             width=50,
                             height=28,
                             tooltip="위로 이동",
-                            on_click=lambda event: None,
+                            data=button_data,
+                            on_click=on_move_item_up,
                         ),
                         create_pill_button(
                             label="아래",
                             width=56,
                             height=28,
                             tooltip="아래로 이동",
-                            on_click=lambda event: None,
+                            data=button_data,
+                            on_click=on_move_item_down,
                         ),
                         create_pill_button(
                             label="삭제",
                             width=56,
                             height=28,
                             tooltip="삭제",
-                            on_click=lambda event: None,
+                            data=button_data,
+                            on_click=on_delete_item,
                         ),
                         create_pill_button(
-                            label="고정",
-                            width=56,
+                            label=fixed_button_label,
+                            width=68,
                             height=28,
                             tooltip="고정",
-                            on_click=lambda event: None,
+                            data=button_data,
+                            on_click=on_toggle_fixed_item,
                         ),
                     ],
                     spacing=6,
@@ -136,11 +235,22 @@ def create_itinerary_card(schedule_item: dict[str, str]) -> ft.Container:
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# 선택된 Day 데이터 조회
+# ──────────────────────────────────────────────────────────────
 def find_selected_itinerary_day(
     itinerary_days: list[dict],
     selected_day_number: int,
 ) -> dict | None:
-    """선택된 Day 데이터를 찾습니다."""
+    """선택된 Day 데이터를 찾습니다.
+
+    Args:
+        itinerary_days:      전체 Day 목록.
+        selected_day_number: 현재 선택된 Day 번호.
+
+    Returns:
+        dict | None — 해당 Day 딕셔너리. 없으면 None.
+    """
 
     for itinerary_day in itinerary_days:
         if itinerary_day["day_number"] == selected_day_number:
@@ -149,12 +259,43 @@ def find_selected_itinerary_day(
     return None
 
 
+# ──────────────────────────────────────────────────────────────
+# 일정 카드 목록 빌드
+# ──────────────────────────────────────────────────────────────
 def build_itinerary_cards(
     itinerary_days: list[dict],
     selected_day_number: int,
+    on_move_item_up,
+    on_move_item_down,
+    on_delete_item,
+    on_toggle_fixed_item,
 ) -> list[ft.Control]:
-    """선택된 Day 번호에 맞는 일정 카드 목록을 만듭니다."""
+    """선택된 Day 번호에 맞는 일정 카드 목록을 만듭니다.
 
+    세 가지 분기:
+        1. itinerary_days가 비어 있으면 → "아직 여행 조건이 입력되지 않았습니다" 안내
+        2. 선택된 Day가 없거나 items가 비어 있으면 → "Day N 일정이 비어 있습니다" 안내
+        3. items가 있으면 → 각 item을 일정 카드로 변환
+
+    Args:
+        itinerary_days:      전체 일정 데이터.
+        selected_day_number: 현재 선택된 Day 번호.
+        on_move_item_up:     위로 이동 핸들러.
+        on_move_item_down:   아래로 이동 핸들러.
+        on_delete_item:      삭제 핸들러.
+        on_toggle_fixed_item: 고정 토글 핸들러.
+
+    Returns:
+        list[ft.Control] — ListView에 넣을 컨트롤 목록.
+    """
+
+    # ── 분기 1: 전체 일정이 아직 없는 경우 ──────────────────
+    if not itinerary_days:
+        return [
+            create_no_trip_notice(),
+        ]
+
+    # ── 분기 2: 선택된 Day가 없거나 items가 비어 있는 경우 ──
     selected_itinerary_day = find_selected_itinerary_day(
         itinerary_days=itinerary_days,
         selected_day_number=selected_day_number,
@@ -172,30 +313,67 @@ def build_itinerary_cards(
             create_empty_itinerary_notice(selected_day_number),
         ]
 
+    # ── 분기 3: 정상 — 각 item을 카드로 변환 ─────────────────
     return [
-        create_itinerary_card(schedule_item)
+        create_itinerary_card(
+            schedule_item=schedule_item,
+            day_number=selected_day_number,
+            on_move_item_up=on_move_item_up,
+            on_move_item_down=on_move_item_down,
+            on_delete_item=on_delete_item,
+            on_toggle_fixed_item=on_toggle_fixed_item,
+        )
         for schedule_item in schedule_items
     ]
 
 
+# ──────────────────────────────────────────────────────────────
+# 일정 패널 전체 생성
+# ──────────────────────────────────────────────────────────────
 def create_itinerary_panel(
     itinerary_days: list[dict],
     selected_day_number: int,
     on_day_click,
+    on_move_item_up,
+    on_move_item_down,
+    on_delete_item,
+    on_toggle_fixed_item,
 ) -> ft.Container:
-    """왼쪽 일정 패널을 만듭니다."""
+    """왼쪽 일정 패널을 만듭니다.
 
+    Day 버튼 목록과 일정 카드 ListView를 수직으로 배치합니다.
+
+    Args:
+        itinerary_days:      전체 일정 데이터.
+        selected_day_number: 현재 선택된 Day 번호.
+        on_day_click:        Day 버튼 클릭 핸들러.
+        on_move_item_up:     위로 이동 핸들러.
+        on_move_item_down:   아래로 이동 핸들러.
+        on_delete_item:      삭제 핸들러.
+        on_toggle_fixed_item: 고정 토글 핸들러.
+
+    Returns:
+        ft.Container — 일정 패널 전체 컨테이너.
+    """
+
+    # ── 일정 카드 목록 (스크롤 가능) ─────────────────────────
     itinerary_list = ft.ListView(
-        expand=True,
-        spacing=10,
+        expand=True,     # 남은 세로 공간을 모두 차지
+        spacing=10,      # 카드 간 간격
         padding=0,
         controls=build_itinerary_cards(
             itinerary_days=itinerary_days,
             selected_day_number=selected_day_number,
+            on_move_item_up=on_move_item_up,
+            on_move_item_down=on_move_item_down,
+            on_delete_item=on_delete_item,
+            on_toggle_fixed_item=on_toggle_fixed_item,
         ),
     )
 
+    # ── Day 버튼 목록 또는 안내 메시지 ───────────────────────
     if itinerary_days:
+        # 일정이 있으면 각 Day에 대한 버튼 생성
         day_buttons = [
             create_day_button(
                 day_number=itinerary_day["day_number"],
@@ -205,6 +383,7 @@ def create_itinerary_panel(
             for itinerary_day in itinerary_days
         ]
     else:
+        # 일정이 없으면 안내 텍스트 표시
         day_buttons = [
             ft.Text(
                 "먼저 오른쪽에 원하는 여행 일정을 입력하세요.",
@@ -213,6 +392,7 @@ def create_itinerary_panel(
             )
         ]
 
+    # ── 패널 레이아웃 조립 ───────────────────────────────────
     return ft.Container(
         expand=True,
         padding=16,
@@ -221,19 +401,60 @@ def create_itinerary_panel(
         border=create_panel_border(),
         content=ft.Column(
             controls=[
+                # 패널 제목
                 ft.Text(
                     "여행 일정",
                     size=20,
                     weight=ft.FontWeight.BOLD,
                     color=PRIMARY_TEXT_COLOR,
                 ),
+                # Day 버튼 행 (wrap=True로 줄바꿈 가능)
                 ft.Row(
                     controls=day_buttons,
                     spacing=8,
                     wrap=True,
                 ),
+                # 일정 카드 목록 (스크롤)
                 itinerary_list,
             ],
             spacing=12,
+        ),
+    )
+
+
+# ──────────────────────────────────────────────────────────────
+# 여행 미생성 안내 카드
+# ──────────────────────────────────────────────────────────────
+def create_no_trip_notice() -> ft.Container:
+    """아직 여행 조건이 입력되지 않았을 때 표시할 안내 카드입니다.
+
+    itinerary_days 자체가 빈 리스트일 때 사용됩니다.
+    (create_empty_itinerary_notice와 구분: 후자는 Day는 있지만 items가 빈 경우)
+
+    Returns:
+        ft.Container — 안내 메시지가 담긴 카드.
+    """
+
+    return ft.Container(
+        padding=14,
+        border_radius=14,
+        bgcolor=CARD_BACKGROUND_COLOR,
+        border=create_card_border(),
+        content=ft.Column(
+            controls=[
+                ft.Text(
+                    "아직 생성된 여행 일정이 없습니다.",
+                    size=15,
+                    weight=ft.FontWeight.BOLD,
+                    color=PRIMARY_TEXT_COLOR,
+                ),
+                ft.Text(
+                    "오른쪽 여행 도우미에게 제주 여행 기간, 동행자, 이동 방식, "
+                    "숙소 조건, 원하는 분위기를 입력해 주세요.",
+                    size=13,
+                    color=SECONDARY_TEXT_COLOR,
+                ),
+            ],
+            spacing=6,
         ),
     )

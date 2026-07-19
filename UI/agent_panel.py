@@ -1,5 +1,4 @@
 import flet as ft
-
 from UI.theme import (
     ACCENT_STRONG_COLOR,
     AGENT_MESSAGE_BACKGROUND_COLOR,
@@ -14,6 +13,7 @@ from UI.theme import (
     create_panel_border,
     create_primary_button,
 )
+from app_config import AGENT_CONDITION_TITLE, AGENT_SUBTITLE, AGENT_TITLE
 
 def create_chat_message(role: str, message: str) -> ft.Container:
     """채팅 메시지 말풍선을 만듭니다."""
@@ -58,20 +58,44 @@ def create_chat_message(role: str, message: str) -> ft.Container:
         ),
     )
 
-
-def create_understood_condition_chip(label: str) -> ft.Container:
-    """Agent가 이해한 여행 조건을 작은 칩 형태로 표시합니다."""
+def create_typing_indicator() -> ft.Container:
+    """에이전트가 응답을 생성 중임을 나타내는 타이핑 인디케이터를 만듭니다."""
 
     return ft.Container(
-        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
-        border_radius=999,
-        bgcolor="#162A41",
-        content=ft.Text(
-            label,
-            size=12,
-            color="#90A7B0",
+        padding=12,
+        border_radius=12,
+        bgcolor=AGENT_MESSAGE_BACKGROUND_COLOR,
+        content=ft.Column(
+            controls=[
+                ft.Text(
+                    "여행 도우미",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=ACCENT_STRONG_COLOR,
+                ),
+                ft.Row(
+                    controls=[
+                        ft.ProgressRing(
+                            width=14,
+                            height=14,
+                            stroke_width=2,
+                            color=ACCENT_STRONG_COLOR,
+                        ),
+                        ft.Text(
+                            "답변을 작성하고 있어요...",
+                            size=13,
+                            color=AGENT_MESSAGE_TEXT_COLOR,
+                            italic=True,
+                        ),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=4,
         ),
     )
+
 
 def get_condition_label(travel_condition) -> str:
     """조건 객체 또는 문자열에서 UI 표시용 label을 꺼냅니다."""
@@ -86,22 +110,22 @@ def create_agent_panel(
     chat_message_list: ft.ListView,
     user_message_input: ft.TextField,
     on_send_message,
-    travel_condition_chips: list[str],
+    travel_condition_chips: list[dict],
 ) -> ft.Container:
     """오른쪽 여행 도우미 패널 전체를 만듭니다."""
 
     if travel_condition_chips:
-        understood_conditions_controls = [
+        understood_condition_controls = [
             create_condition_chip(get_condition_label(travel_condition))
             for travel_condition in travel_condition_chips
         ]
     else:
-        understood_conditions_controls = [
-            create_condition_chip("조건 대기 중"),
+        understood_condition_controls = [
+            create_condition_chip("제주 여행"),
         ]
 
     understood_conditions = ft.Row(
-        controls=understood_conditions_controls,
+        controls=understood_condition_controls,
         wrap=True,
         spacing=8,
         run_spacing=8,
@@ -123,18 +147,18 @@ def create_agent_panel(
         content=ft.Column(
             controls=[
                 ft.Text(
-                    "제주 여행 도우미",
+                    AGENT_TITLE,
                     size=20,
                     weight=ft.FontWeight.BOLD,
                     color=PRIMARY_TEXT_COLOR,
                 ),
                 ft.Text(
-                    "먼저 원하는 여행 조건을 자연어로 입력하세요.",
+                    AGENT_SUBTITLE,
                     size=12,
                     color=SECONDARY_TEXT_COLOR,
                 ),
                 ft.Text(
-                    "현재 여행 조건",
+                    AGENT_CONDITION_TITLE,
                     size=13,
                     weight=ft.FontWeight.BOLD,
                     color=PRIMARY_TEXT_COLOR,
